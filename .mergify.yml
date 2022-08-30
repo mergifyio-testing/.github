@@ -1,4 +1,4 @@
 defaults:
   actions:
     comment:
-      bot_account: Autobot
+      bot_account: mergify-ci-bot
