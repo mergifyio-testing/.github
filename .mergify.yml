@@ -1,7 +1,208 @@
-pull_request_rules:
-  - name: comment with default
+defaults:
+  actions:
+    queue:
+      name: default
+      method: squash
+      commit_message_template: |
+        {{ title }} (#{{ number }})
+
+        {{ body }}
+    squash:
+      commit_message: first-commit
+
+queue_rules:
+  - name: hotfix
+    allow_inplace_checks: true
     conditions:
-      - label=comment
+      - and: &CheckRuns
+          - or:
+              - -label=Docker
+              - check-success=docker
+          - check-success=import-checks
+          - check-success=pep8
+          - check-success=test
+          - check-success=docs
+    speculative_checks: 5
+
+  - name: default
+    allow_inplace_checks: true
+    conditions:
+      - and: *CheckRuns
+      - schedule=Mon-Fri 09:00-17:30[Europe/Paris]
+    speculative_checks: 5
+
+  - name: lowprio
+    allow_inplace_checks: true
+    conditions:
+      - and: *CheckRuns
+      - schedule=Mon-Fri 09:30-17:00[Europe/Paris]
+    speculative_checks: 3
+    batch_size: 5
+    batch_max_wait_time: 5min
+
+pull_request_rules:
+  - name: automatic merge for hotfix
+    conditions:
+      - base=main
+      - author=@devs
+      - check-success=semantic-pull-request
+      - label=hotfix
+      - title~=^(revert|fix)
+      - "#approved-reviews-by>=1"
+      - "#changes-requested-reviews-by=0"
+      - label!=work-in-progress
+      - label!=manual merge
+    actions:
+      queue:
+        name: hotfix
+
+  - name: automatic merge
+    conditions:
+      - base=main
+      - check-success=semantic-pull-request
+      - and: *CheckRuns
+      - "check-success=Rule: feature requirements (post_check)"
+      - "check-success=Rule: testing requirements (post_check)"
+      - "#approved-reviews-by>=2"
+      - "#changes-requested-reviews-by=0"
+      - "#review-threads-unresolved=0"
+      - label!=work-in-progress
+      - label!=manual merge
+    actions:
+      queue:
+
+  - name: automatic merge for clifus version bump
+    conditions:
+      - and: *CheckRuns
+      - check-success=semantic-pull-request
+      - author=mergify-ci-bot
+      - label!=work-in-progress
+      - label!=manual merge
+      - "title~=^chore: bump"
+      - "#commits=1"
+      - head~=^clifus/
+    actions:
+      queue:
+        name: lowprio
+        method: rebase
+
+  - name: automatic merge from dependabot
+    conditions:
+      - and: *CheckRuns
+      - check-success=semantic-pull-request
+      - author=dependabot[bot]
+      - label!=work-in-progress
+      - label!=manual merge
+      - "#commits=1"
+    actions:
+      queue:
+        name: lowprio
+        method: rebase
+        commit_message_template: null
+
+  - name: dependabot conflict fixer
+    conditions:
+      - author=dependabot[bot]
+      - conflict
     actions:
       comment:
-        message: I love Mergify
+        message: "@dependabot recreate"
+
+  - name: dismiss reviews
+    conditions: []
+    actions:
+      dismiss_reviews: {}
+
+  - name: request review
+    conditions:
+      - -author=dependabot[bot]
+      - -author=mergify-ci-bot
+      - label!=work-in-progress
+      - -merged
+      - -closed
+      - and: *CheckRuns
+      - "check-success=Rule: feature requirements (post_check)"
+      - "check-success=Rule: testing requirements (post_check)"
+      - "#approved-reviews-by=0"
+      - "#changes-requested-reviews-by=0"
+    actions:
+      request_reviews:
+        teams:
+          - devs
+  - name: warn on conflicts
+    conditions:
+      - conflict
+      - -closed
+    actions:
+      comment:
+        message: "@{{author}} this pull request is now in conflict 😩"
+      label:
+        add:
+          - conflict
+  - name: remove conflict label if not needed
+    conditions:
+      - -conflict
+    actions:
+      label:
+        remove:
+          - conflict
+
+  - name: label on unresolved
+    conditions:
+      - "#review-threads-unresolved>0"
+    actions:
+      label:
+        add:
+          - Review Threads Unresolved
+
+  - name: unlabel on resolved
+    conditions:
+      - "#review-threads-unresolved=0"
+    actions:
+      label:
+        remove:
+          - Review Threads Unresolved
+
+  - name: warn on CI failure for hotfix
+    conditions:
+      - label=hotfix
+      - "#check-failure>0"
+    actions:
+      comment:
+        message: Your hotfix is failing CI @{{author}} 🥺
+
+  - name: feature requirements
+    conditions:
+      - or:
+          - "-title~=^feat"
+          - and:
+              - or:
+                  - label=Skip release note
+                  - files~=^releasenotes/notes
+              - or:
+                  - label=Skip documentation
+                  - files~=^docs/source
+              - body~=MRGFY-
+    actions:
+      post_check:
+        title: |
+          {% if check_succeed %}
+          Feature requirements are present.
+          {% else %}
+          Feature requirements are missing.
+          {% endif %}
+
+  - name: testing requirements
+    conditions:
+      - or:
+          - label=Skip tests
+          - "-title~=^(feat|fix)"
+          - "files~=mergify_engine/tests"
+    actions:
+      post_check:
+        title: |
+          {% if check_succeed %}
+          Testing requirements are present.
+          {% else %}
+          Testing requirements are missing.
+          {% endif %}
