@@ -1,8 +1,3 @@
-defaults:
-  actions:
-    comment:
-      bot_account: mergify-ci-bot
-
 pull_request_rules:
   - name: comment with default
     conditions:
