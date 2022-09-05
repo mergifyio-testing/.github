@@ -9,7 +9,6 @@ defaults:
         {{ body }}
     squash:
       commit_message: first-commit
-      bot_account: mergify-ci-bot
 
 queue_rules:
   - name: hotfix
@@ -107,7 +106,6 @@ pull_request_rules:
       - conflict
     actions:
       comment:
-        bot_account: mergify-ci-bot
         message: "@dependabot recreate"
 
   - name: dismiss reviews
